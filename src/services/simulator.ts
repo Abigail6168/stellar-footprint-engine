@@ -8,10 +8,12 @@ import {
   hasContractCreationInstance,
   extractContracts,
   detectTokenContract,
+  mergeFootprints,
+  detectSacContracts,
+  calculateFootprintStats,
   type FootprintEntry,
   type ContractType,
 } from "./footprintParser";
-import { optimizeFootprint } from "./optimizer";
 // import { calculateResourceFee } from "./feeEstimator"; // unused
 import {
   ErrorCode,
@@ -222,9 +224,13 @@ export interface SimulateResult {
   footprint?: {
     readOnly: FootprintEntry[];
     readWrite: FootprintEntry[];
+    breakdown?: FootprintBreakdown;
   };
   contracts?: string[];
   contractType?: ContractType;
+  isSAC?: boolean;
+  assetInfo?: AssetInfo;
+  sacContracts?: SacContract[];
   ttl?: Record<string, TtlInfo>;
   ttlWarnings?: string[];
   optimized?: boolean;
@@ -273,11 +279,18 @@ async function _processSimulationResult(
     readWrite: footprintXdr.readWrite.map((e) => e.toXDR("base64")),
   };
 
-  const parsed = parseFootprint(rawFootprint);
-  const optimizationResult = optimizeFootprint(
-    parsed.readOnly,
-    parsed.readWrite,
+  const merged = mergeFootprints([rawFootprint]);
+  const { networkPassphrase } = getNetworkConfig(network);
+  const initial = parseFootprint(merged, networkPassphrase);
+  const sacContracts = await detectSacContracts(
+    [...initial.readOnly, ...initial.readWrite],
+    server,
+    networkPassphrase,
   );
+  const parsed = parseFootprint(merged, networkPassphrase, sacContracts);
+  const optimized =
+    merged.readOnly.length + merged.readWrite.length <
+    rawFootprint.readOnly.length + rawFootprint.readWrite.length;
 
   const allXdrEntries = [...rawFootprint.readOnly, ...rawFootprint.readWrite];
   const contracts = extractContracts(allXdrEntries);
@@ -302,10 +315,7 @@ async function _processSimulationResult(
       ? describeInvocation(invocationOp.func.invokeContract)
       : undefined;
 
-  const footprintStats = calculateFootprintStats(
-    rawFootprint.readOnly,
-    rawFootprint.readWrite,
-  );
+  const footprintStats = calculateFootprintStats(merged, parsed);
 
   return {
     success: true,
@@ -321,8 +331,11 @@ async function _processSimulationResult(
     },
     contracts,
     contractType,
+    isSAC: parsed.isSAC,
+    assetInfo: parsed.assetInfo,
+    sacContracts: parsed.sacContracts,
     ttl,
-    optimized: optimizationResult.optimized,
+    optimized,
     rawFootprint,
     footprintStats,
     cost: {

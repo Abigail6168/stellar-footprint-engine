@@ -87,21 +87,134 @@ export function extractContracts(footprintEntries: string[]): string[] {
  * @param footprint - Object with readOnly and readWrite arrays
  * @returns Object with parsed entries and contracts array
  */
-export function parseFootprint(footprint: {
-  readOnly: string[];
-  readWrite: string[];
-}): {
+export function parseFootprint(
+  footprint: {
+    readOnly: string[];
+    readWrite: string[];
+  },
+  networkPassphrase: string = StellarSdk.Networks.TESTNET,
+  sacContracts: SacContract[] = [],
+): {
   readOnly: FootprintEntry[];
   readWrite: FootprintEntry[];
   contracts: string[];
+  isSAC: boolean;
+  assetInfo?: AssetInfo;
+  sacContracts: SacContract[];
+  breakdown: FootprintBreakdown;
 } {
   const allEntries = [...footprint.readOnly, ...footprint.readWrite];
   const contracts = extractContracts(allEntries);
 
+  const readOnly = parseFootprintEntries(footprint.readOnly);
+  const readWrite = parseFootprintEntries(footprint.readWrite);
+  const entries = [...readOnly, ...readWrite];
+  const assets: AssetInfo[] = [{ code: "XLM" }];
+  for (const entry of entries) {
+    if (entry.type === "TrustLine" && entry.assetInfo)
+      assets.push(entry.assetInfo);
+  }
+  const sacs = new Map(
+    sacContracts.map((contract) => [contract.contractId, contract]),
+  );
+  for (const entry of entries) {
+    if (entry.type !== "ContractData" || !entry.contractId) continue;
+    const contractId = entry.contractId;
+    const assetInfo = assets.find((asset) =>
+      isSacContract(contractId, asset, networkPassphrase),
+    );
+    if (assetInfo)
+      sacs.set(entry.contractId, {
+        contractId: entry.contractId,
+        isSAC: true,
+        assetInfo,
+      });
+  }
+  for (const entry of entries) {
+    const sac =
+      entry.type === "ContractData" && entry.contractId
+        ? sacs.get(entry.contractId)
+        : undefined;
+    const balanceAsset =
+      entry.type === "Account"
+        ? { code: "XLM" }
+        : entry.type === "TrustLine"
+          ? entry.assetInfo
+          : undefined;
+    const balanceSac = balanceAsset
+      ? [...sacs.values()].find(
+          (candidate) =>
+            candidate.assetInfo?.code === balanceAsset.code &&
+            candidate.assetInfo?.issuer === balanceAsset.issuer,
+        )
+      : undefined;
+    entry.isSAC = Boolean(sac || balanceSac);
+    if (sac?.assetInfo) entry.assetInfo = sac.assetInfo;
+    if (balanceSac?.assetInfo) entry.assetInfo = balanceSac.assetInfo;
+  }
+  const confirmed = [...sacs.values()];
   return {
-    readOnly: parseFootprintEntries(footprint.readOnly),
-    readWrite: parseFootprintEntries(footprint.readWrite),
+    readOnly,
+    readWrite,
     contracts,
+    isSAC: confirmed.length > 0,
+    ...(confirmed.length === 1 && confirmed[0].assetInfo
+      ? { assetInfo: confirmed[0].assetInfo }
+      : {}),
+    sacContracts: confirmed,
+    breakdown: buildFootprintBreakdown(readOnly, readWrite),
+  };
+}
+
+function buildFootprintBreakdown(
+  readOnly: FootprintEntry[],
+  readWrite: FootprintEntry[],
+): FootprintBreakdown {
+  const empty = () => ({
+    count: 0,
+    estimatedSizeBytes: 0,
+    readOnly: [] as string[],
+    readWrite: [] as string[],
+  });
+  const breakdown: FootprintBreakdown = {
+    contractCode: empty(),
+    contractInstance: empty(),
+    persistentData: empty(),
+    temporaryData: empty(),
+  };
+  for (const [entries, mode] of [
+    [readOnly, "readOnly"],
+    [readWrite, "readWrite"],
+  ] as const) {
+    for (const entry of entries) {
+      if (!entry.storageType) continue;
+      const category = breakdown[entry.storageType];
+      category[mode].push(entry.xdr);
+      category.count++;
+      category.estimatedSizeBytes += Buffer.from(entry.xdr, "base64").length;
+    }
+  }
+  return breakdown;
+}
+
+export function calculateFootprintStats(
+  footprint: { readOnly: string[]; readWrite: string[] },
+  parsed: Pick<
+    ReturnType<typeof parseFootprint>,
+    "isSAC" | "assetInfo" | "breakdown"
+  > = parseFootprint(footprint),
+): FootprintStats {
+  return {
+    readOnlyCount: footprint.readOnly.length,
+    readWriteCount: footprint.readWrite.length,
+    totalEntries: footprint.readOnly.length + footprint.readWrite.length,
+    estimatedSizeBytes: [...footprint.readOnly, ...footprint.readWrite].reduce(
+      (sum, key) => sum + Buffer.from(key, "base64").length,
+      0,
+    ),
+    isSAC: parsed.isSAC,
+    ...(parsed.assetInfo ? { assetInfo: parsed.assetInfo } : {}),
+    breakdown: parsed.breakdown,
   };
 }
 
@@ -121,8 +234,6 @@ const SEP41_FUNCTIONS = [
   "mint",
 ];
 
-export type ContractType = "token" | "unknown";
-
 /** Cache of contractId → detected ContractType */
 const contractTypeCache = new Map<string, ContractType>();
 
@@ -137,7 +248,10 @@ const contractTypeCache = new Map<string, ContractType>();
 export async function detectTokenContract(
   contractId: string,
   server: StellarSdk.rpc.Server,
+  networkPassphrase: string = StellarSdk.Networks.TESTNET,
 ): Promise<ContractType> {
+  if (isSacContract(contractId, { code: "XLM" }, networkPassphrase))
+    return "sac";
   if (contractTypeCache.has(contractId)) {
     return contractTypeCache.get(contractId)!;
   }

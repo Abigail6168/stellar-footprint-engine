@@ -10,6 +10,12 @@ import * as footprintParser from "../footprintParser";
 jest.mock("../../config/stellar", () => ({
   ...jest.requireActual("../../config/stellar"),
   getRpcServer: jest.fn(),
+  getNetworkConfig: jest.fn((network: string) => ({
+    networkPassphrase:
+      network === "mainnet"
+        ? StellarSdk.Networks.PUBLIC
+        : StellarSdk.Networks.TESTNET,
+  })),
 }));
 
 const mockedGetRpcServer = stellarConfig.getRpcServer as jest.MockedFunction<
@@ -75,7 +81,11 @@ describe("extractFootprint", () => {
     expect(extracted.optimizationResult.readOnly).toHaveLength(1);
     expect(extracted.contracts).toEqual(["01".repeat(32)]);
     expect(extracted.contractType).toBe("sac");
-    expect(detectSpy).toHaveBeenCalledWith("01".repeat(32), mockServer);
+    expect(detectSpy).toHaveBeenCalledWith(
+      "01".repeat(32),
+      mockServer,
+      StellarSdk.Networks.TESTNET,
+    );
 
     detectSpy.mockRestore();
   });

@@ -461,7 +461,16 @@ paths:
       description: |
         Computes added and removed read-only and read-write ledger keys between two
         transaction footprints (`before` and `after`).
+        Set `format=markdown` for a table of additions, removals, and RO/RW access changes.
       operationId: diffFootprint
+      parameters:
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [json, markdown]
+            default: json
       requestBody:
         required: true
         content:
@@ -475,6 +484,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FootprintDiffResponse"
+            text/markdown:
+              schema:
+                type: string
+              example: |
+                | Change Type | Entry Type | Contract ID / Account | Access Mode |
+                | --- | --- | --- | --- |
+                | modified | Account | G... | RO → RW |
         "400":
           $ref: "#/components/responses/BadRequest"
         "500":
@@ -1247,6 +1263,97 @@ components:
         ttlExtension:
           $ref: "#/components/schemas/TtlExtensionRecommendation"
 
+    AssetInfo:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: XLM for native balances, or the issued asset code
+        issuer:
+          type: string
+          description: Stellar account address; omitted for native XLM
+
+    FootprintEntry:
+      type: object
+      required: [xdr, type]
+      properties:
+        xdr:
+          type: string
+        type:
+          type: string
+          enum: [ContractData, ContractCode, Account, TrustLine, Unknown]
+        contractId:
+          type: string
+          description: Contract address bytes or code hash in hexadecimal
+        accountId:
+          type: string
+        storageType:
+          type: string
+          enum: [contractCode, contractInstance, persistentData, temporaryData]
+        isSAC:
+          type: boolean
+        assetInfo:
+          $ref: "#/components/schemas/AssetInfo"
+
+    StorageStats:
+      allOf:
+        - $ref: "#/components/schemas/Footprint"
+        - type: object
+          required: [count, estimatedSizeBytes]
+          properties:
+            count:
+              type: integer
+            estimatedSizeBytes:
+              type: integer
+              description: Serialized XDR ledger key bytes, excluding stored values
+
+    FootprintBreakdown:
+      type: object
+      required: [contractCode, contractInstance, persistentData, temporaryData]
+      properties:
+        contractCode:
+          $ref: "#/components/schemas/StorageStats"
+        contractInstance:
+          $ref: "#/components/schemas/StorageStats"
+        persistentData:
+          $ref: "#/components/schemas/StorageStats"
+        temporaryData:
+          $ref: "#/components/schemas/StorageStats"
+
+    ParsedFootprint:
+      type: object
+      required: [readOnly, readWrite, breakdown]
+      properties:
+        readOnly:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootprintEntry"
+        readWrite:
+          type: array
+          items:
+            $ref: "#/components/schemas/FootprintEntry"
+        breakdown:
+          $ref: "#/components/schemas/FootprintBreakdown"
+
+    FootprintStats:
+      type: object
+      properties:
+        readOnlyCount:
+          type: integer
+        readWriteCount:
+          type: integer
+        totalEntries:
+          type: integer
+        estimatedSizeBytes:
+          type: integer
+        isSAC:
+          type: boolean
+        assetInfo:
+          $ref: "#/components/schemas/AssetInfo"
+        breakdown:
+          $ref: "#/components/schemas/FootprintBreakdown"
+
     SimulateSuccessResponse:
       type: object
       required: [success, footprint, cost]
@@ -1363,32 +1470,14 @@ components:
           enum: [true]
         data:
           type: object
-          required: [readOnly, readWrite]
+          required: [added, removed, unchanged]
           properties:
-            readOnly:
-              type: object
-              required: [added, removed]
-              properties:
-                added:
-                  type: array
-                  items:
-                    type: string
-                removed:
-                  type: array
-                  items:
-                    type: string
-            readWrite:
-              type: object
-              required: [added, removed]
-              properties:
-                added:
-                  type: array
-                  items:
-                    type: string
-                removed:
-                  type: array
-                  items:
-                    type: string
+            added:
+              $ref: "#/components/schemas/Footprint"
+            removed:
+              $ref: "#/components/schemas/Footprint"
+            unchanged:
+              $ref: "#/components/schemas/Footprint"
 
     # ── Decode ───────────────────────────────────────────────────────────────
     DecodeResponse:

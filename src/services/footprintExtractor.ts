@@ -4,6 +4,8 @@ import {
   parseFootprint,
   extractContracts,
   detectTokenContract,
+  mergeFootprints,
+  detectSacContracts,
   type FootprintEntry,
   type ContractType,
 } from "./footprintParser";
@@ -47,6 +49,7 @@ export interface ExtractedFootprint {
   parsedFootprint: {
     readOnly: FootprintEntry[];
     readWrite: FootprintEntry[];
+    breakdown: FootprintBreakdown;
   };
   optimizationResult: {
     readOnly: FootprintEntry[];
@@ -55,13 +58,18 @@ export interface ExtractedFootprint {
   };
   contracts: string[];
   contractType: ContractType;
+  isSAC: boolean;
+  assetInfo?: AssetInfo;
+  sacContracts: SacContract[];
 }
 
 /**
  * Extract footprint from simulation response
  */
 export async function extractFootprint(
-  response: StellarSdk.rpc.Api.SimulateTransactionSuccessResponse,
+  response:
+    | StellarSdk.rpc.Api.SimulateTransactionSuccessResponse
+    | readonly StellarSdk.rpc.Api.SimulateTransactionSuccessResponse[],
   network: Network,
 ): Promise<ExtractedFootprint> {
   if (!response.transactionData) {
@@ -78,19 +86,39 @@ export async function extractFootprint(
     ),
   };
 
-  const parsedFootprint = parseFootprint(rawFootprint);
+  const { networkPassphrase } = getNetworkConfig(network);
+  const server = getRpcServer(network);
+  const initial = parseFootprint(rawFootprint, networkPassphrase);
+  const sacContracts = await detectSacContracts(
+    [...initial.readOnly, ...initial.readWrite],
+    server,
+    networkPassphrase,
+  );
+  const parsedFootprint = parseFootprint(
+    rawFootprint,
+    networkPassphrase,
+    sacContracts,
+  );
   const allEntries = [...rawFootprint.readOnly, ...rawFootprint.readWrite];
   const contracts = extractContracts(allEntries);
 
-  const optimizationResult = optimizeFootprint(
-    parsedFootprint.readOnly,
-    parsedFootprint.readWrite,
+  const merged = parseFootprint(
+    mergeFootprints([rawFootprint]),
+    networkPassphrase,
+    sacContracts,
   );
+  const optimizationResult = {
+    readOnly: merged.readOnly,
+    readWrite: merged.readWrite,
+    optimized:
+      merged.readOnly.length + merged.readWrite.length <
+      rawFootprint.readOnly.length + rawFootprint.readWrite.length,
+  };
 
-  const server = getRpcServer(network);
-  const contractType =
-    contracts.length > 0
-      ? await detectTokenContract(contracts[0], server)
+  const contractType = parsedFootprint.isSAC
+    ? "sac"
+    : contracts.length > 0
+      ? await detectTokenContract(contracts[0], server, networkPassphrase)
       : "unknown";
 
   return {
@@ -103,5 +131,40 @@ export async function extractFootprint(
     optimizationResult,
     contracts,
     contractType,
+    isSAC: parsedFootprint.isSAC,
+    assetInfo: parsedFootprint.assetInfo,
+    sacContracts: parsedFootprint.sacContracts,
   };
+}
+
+/**
+ * Soroban resources are shared by all operations in a v1 envelope. Classic
+ * operations carry no separate footprint; fee bumps use their inner envelope.
+ */
+export function extractEnvelopeFootprint(
+  envelope: StellarSdk.xdr.TransactionEnvelope,
+): { readOnly: string[]; readWrite: string[] } {
+  const type = envelope.switch().name;
+  const tx =
+    type === "envelopeTypeTxFeeBump"
+      ? envelope.feeBump().tx().innerTx().v1().tx()
+      : type === "envelopeTypeTx"
+        ? envelope.v1().tx()
+        : undefined;
+  if (!tx || tx.ext().switch() !== 1) return { readOnly: [], readWrite: [] };
+  const hasSorobanOperation = tx
+    .operations()
+    .some((operation) =>
+      ["invokeHostFunction", "extendFootprintTtl", "restoreFootprint"].includes(
+        operation.body().switch().name,
+      ),
+    );
+  if (!hasSorobanOperation) return { readOnly: [], readWrite: [] };
+  const footprint = tx.ext().sorobanData().resources().footprint();
+  return mergeFootprints([
+    {
+      readOnly: footprint.readOnly().map((key) => key.toXDR("base64")),
+      readWrite: footprint.readWrite().map((key) => key.toXDR("base64")),
+    },
+  ]);
 }

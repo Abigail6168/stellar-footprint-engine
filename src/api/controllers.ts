@@ -487,6 +487,13 @@ export async function footprintDiffController(
 
   try {
     const diff = footprintDiff(before, after);
+    if (req.query.format === "markdown") {
+      res
+        .status(HTTP_STATUS.OK)
+        .type("text/markdown")
+        .send(formatDiffAsMarkdown(diff));
+      return;
+    }
     const response: ResponseEnvelope = {
       success: true,
       data: diff,

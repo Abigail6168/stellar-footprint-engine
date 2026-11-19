@@ -17,6 +17,38 @@ export interface FootprintStats {
   readWriteSizeBytes: number;
   /** Exact serialized LedgerFootprint size; retained name for API compatibility. */
   estimatedSizeBytes: number;
+  isSAC: boolean;
+  assetInfo?: AssetInfo;
+  breakdown: FootprintBreakdown;
+}
+
+export type StorageCategory =
+  | "contractCode"
+  | "contractInstance"
+  | "persistentData"
+  | "temporaryData";
+
+export interface StorageStats {
+  count: number;
+  /** Size of serialized ledger keys, excluding values unavailable in a footprint. */
+  estimatedSizeBytes: number;
+  readOnly: string[];
+  readWrite: string[];
+}
+
+export type FootprintBreakdown = Record<StorageCategory, StorageStats>;
+
+export interface AssetInfo {
+  code: string;
+  issuer?: string;
+}
+
+export type ContractType = "token" | "sac" | "unknown";
+
+export interface SacContract {
+  contractId: string;
+  isSAC: true;
+  assetInfo?: AssetInfo;
 }
 
 export interface AuthEntry {
