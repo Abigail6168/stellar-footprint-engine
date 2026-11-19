@@ -12,96 +12,55 @@ export type LedgerKeyType =
   | "TrustLine"
   | "Unknown";
 
-/**
- * A footprint entry with its type and extracted data
- */
 export interface FootprintEntry {
-  /** The raw base64 XDR of the entry */
+  /** Raw base64 is retained even if the SDK cannot decode a future key. */
   xdr: string;
-  /** The classified type of the ledger key */
   type: LedgerKeyType;
-  /** The contract ID if this is a ContractData or ContractCode entry */
   contractId?: string;
+  ttlInfo?: TtlInfo;
 }
 
-/**
- * Get the switch name for a ledger key
- */
-function getLedgerKeySwitchName(key: StellarSdk.xdr.LedgerKey): string {
-  return key.switch().name;
-}
-
-/**
- * Parse a single footprint entry XDR and extract its contract ID
- * @param xdrBase64 - The base64 encoded XDR string
- * @returns The decoded contract ID if this is a ContractData or ContractCode entry
- */
-function extractContractId(xdrBase64: string): string | undefined {
-  try {
-    const ledgerKey = StellarSdk.xdr.LedgerKey.fromXDR(xdrBase64, "base64");
-    const switchName = getLedgerKeySwitchName(ledgerKey);
-
-    // Check if this is a ContractData or ContractCode entry
-    if (switchName === "contractData") {
-      const contractData = ledgerKey.contractData();
-      return (contractData.contract().value() as unknown as Buffer).toString(
-        "hex",
-      );
-    }
-
-    if (switchName === "contractCode") {
-      const contractCode = ledgerKey.contractCode();
-      return contractCode.hash().toString("hex");
-    }
-
-    return undefined;
-  } catch {
-    return undefined;
+function classifyEntryType(key: StellarSdk.xdr.LedgerKey): LedgerKeyType {
+  switch (key.type) {
+    case "contractData":
+      return LedgerKeyType.CONTRACT_DATA;
+    case "contractCode":
+      return LedgerKeyType.CONTRACT_CODE;
+    case "account":
+      return LedgerKeyType.ACCOUNT;
+    case "trustline":
+      return LedgerKeyType.TRUST_LINE;
+    case "offer":
+      return LedgerKeyType.OFFER;
+    case "data":
+      return LedgerKeyType.DATA;
+    case "claimableBalance":
+      return LedgerKeyType.CLAIMABLE_BALANCE;
+    case "liquidityPool":
+      return LedgerKeyType.LIQUIDITY_POOL;
+    case "configSetting":
+      return LedgerKeyType.CONFIG_SETTING;
+    case "ttl":
+      return LedgerKeyType.TTL;
+    default:
+      return LedgerKeyType.UNKNOWN;
   }
 }
 
-/**
- * Classify a ledger key XDR into its type
- * @param xdrBase64 - The base64 encoded XDR string
- * @returns The type of the ledger key
- */
-function classifyEntryType(xdrBase64: string): LedgerKeyType {
-  try {
-    const ledgerKey = StellarSdk.xdr.LedgerKey.fromXDR(xdrBase64, "base64");
-    const switchName = getLedgerKeySwitchName(ledgerKey);
-
-    switch (switchName) {
-      case "contractData":
-        return "ContractData";
-      case "contractCode":
-        return "ContractCode";
-      case "account":
-        return "Account";
-      case "trustline":
-        return "TrustLine";
-      default:
-        return "Unknown";
-    }
-  } catch {
-    return "Unknown";
-  }
-}
-
-/**
- * Parse footprint entries and extract contract IDs
- * @param footprintEntries - Array of base64 XDR strings
- * @returns Array of footprint entries with type and contract ID
- */
 export function parseFootprintEntries(entries: string[]): FootprintEntry[] {
-  return entries.map((xdr) => {
-    const type = classifyEntryType(xdr);
-    const contractId = extractContractId(xdr);
-
-    return {
-      xdr,
-      type,
-      contractId,
-    };
+  return entries.map((raw) => {
+    const key = parseLedgerKey(raw);
+    if (!key) return { xdr: raw, type: LedgerKeyType.UNKNOWN };
+    let contractId: string | undefined;
+    if (
+      key.type === "contractData" &&
+      key.contractData.contract.type === "scAddressTypeContract"
+    ) {
+      contractId = key.contractData.contract.contractId.toString();
+    } else if (key.type === "contractCode") {
+      contractId = key.contractCode.hash.toString();
+    }
+    return { xdr: raw, type: classifyEntryType(key), contractId };
   });
 }
 
@@ -189,7 +148,7 @@ export async function detectTokenContract(
     );
     const ledgerKey = StellarSdk.xdr.LedgerKey.contractCode(
       new StellarSdk.xdr.LedgerKeyContractCode({
-        hash: contractIdBytes as unknown as Buffer,
+        hash: contractIdBytes,
       }),
     );
 
@@ -201,8 +160,8 @@ export async function detectTokenContract(
       return "unknown";
     }
 
-    const ledgerEntryData = entry.val.contractCode();
-    const wasmBytes = ledgerEntryData.code() as unknown as Uint8Array;
+    if (entry.val.type !== "contractCode") return "unknown";
+    const wasmBytes = entry.val.contractCode.code;
     const wasmText = new TextDecoder().decode(wasmBytes);
 
     const matchCount = SEP41_FUNCTIONS.filter((fn) =>

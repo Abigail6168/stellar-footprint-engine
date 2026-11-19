@@ -174,11 +174,7 @@ describe("detectTokenContract", () => {
       "transfer transfer_from burn burn_from balance allowance approve decimals name symbol",
     );
     const mockEntry = {
-      val: {
-        contractCode: () => ({
-          code: () => sep41Wasm,
-        }),
-      },
+      val: { type: "contractCode", contractCode: { code: sep41Wasm } },
     };
     const server = makeMockServer([mockEntry]);
     const result = await detectTokenContract(id, server);
@@ -189,11 +185,7 @@ describe("detectTokenContract", () => {
     const id = "cc".repeat(32);
     const sparseWasm = Buffer.from("transfer balance");
     const mockEntry = {
-      val: {
-        contractCode: () => ({
-          code: () => sparseWasm,
-        }),
-      },
+      val: { type: "contractCode", contractCode: { code: sparseWasm } },
     };
     const server = makeMockServer([mockEntry]);
     const result = await detectTokenContract(id, server);
