@@ -3,6 +3,11 @@
 import dotenv from "dotenv";
 dotenv.config();
 
+// Initialize OpenTelemetry before Express and other instrumented modules load
+// eslint-disable-next-line import-x/order
+import { initTracing, shutdownTracing } from "./tracing";
+initTracing();
+
 const _startupBegin = process.hrtime.bigint();
 
 import path from "path";
