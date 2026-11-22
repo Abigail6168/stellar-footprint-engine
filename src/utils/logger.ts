@@ -38,13 +38,26 @@ const productionOptions: pino.LoggerOptions = {
   },
   redact: {
     paths: [
+      "req.headers.authorization",
+      'req.headers["authorization"]',
+      'req.headers[\'authorization\']',
+      "req.headers[\"x-api-key\"]",
+      'req.headers[\'x-api-key\']',
+      "req.body.secretKey",
       "secretKey",
       "MAINNET_SECRET_KEY",
       "TESTNET_SECRET_KEY",
       "authorization",
+      "x-api-key",
       "password",
     ],
-    censor: "[Redacted]",
+    censor: "[REDACTED]",
+  },
+  hooks: {
+    logMethod(inputArgs, method) {
+      const scrubbedArgs = inputArgs.map((arg) => scrubStellarSecretKeys(arg));
+      return method.apply(this, scrubbedArgs as [any, ...any[]]);
+    },
   },
 };
 
