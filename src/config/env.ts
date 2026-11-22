@@ -42,14 +42,7 @@ export const EnvSchema = z.object({
   FEE_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(60),
   FEE_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
   BATCH_CONCURRENCY: z.coerce.number().int().positive().default(5),
-  REDIS_HOST: z.string().default("redis"),
-  REDIS_PORT: z.coerce.number().int().positive().default(6379),
-  BRUTE_FORCE_REDIS_URL: z.string().default(""),
-  GRAFANA_USER: z.string().default("admin"),
-  GRAFANA_PASSWORD: z.string().default("admin"),
-  NETWORK_STATUS_TTL_MS: z.coerce.number().int().positive().default(10000),
-  KEEP_ALIVE_TIMEOUT_MS: z.coerce.number().int().positive().default(65000),
-  HEADERS_TIMEOUT_MS: z.coerce.number().int().positive().default(66000),
+  BATCH_MAX_SIZE: z.coerce.number().int().positive().default(10),
 });
 
 export type EnvConfig = z.infer<typeof EnvSchema>;
