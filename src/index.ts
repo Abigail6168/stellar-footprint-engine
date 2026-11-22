@@ -18,6 +18,7 @@ import express from "express";
 import helmet from "helmet";
 
 import routes from "./api/routes";
+import { attachWsGateway } from "./api/wsGateway";
 import { apiKeyAuth } from "./middleware/apiKeyAuth";
 import { bruteForceMiddleware } from "./middleware/bruteForce";
 import { contentTypeMiddleware } from "./middleware/contentType";
@@ -217,6 +218,9 @@ if (require.main === module) {
       process.send("ready");
     }
   });
+
+  // Attach WebSocket gateway on /ws (gracefully skipped if `ws` is not installed).
+  const teardownWs = attachWsGateway(server);
 
   server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
   server.headersTimeout = HEADERS_TIMEOUT_MS;

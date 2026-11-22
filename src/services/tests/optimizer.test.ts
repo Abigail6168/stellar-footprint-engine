@@ -3,9 +3,13 @@ import { optimizeFootprint } from "../optimizer";
 
 const entry = (xdr: string): FootprintEntry => ({ xdr, type: "ContractData" });
 
-const A = entry("entryA");
-const B = entry("entryB");
-const C = entry("entryC");
+// Use realistic-looking base64 strings so the canonical comparison is exercised.
+const A = entry("AAAAAAAAAAA=");
+const B = entry("AAAAAAAAAAB=");
+const C = entry("AAAAAAAAAAC=");
+
+// Same payload as B but with slightly different (but equivalent) padding
+const B_EQUIV = entry("AAAAAAAAAAB");
 
 describe("optimizeFootprint", () => {
   it("removes readOnly entries that are also in readWrite", () => {
