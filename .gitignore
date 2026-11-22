@@ -72,6 +72,8 @@ nginx/certs/*.pem
 nginx/certs/*.crt
 nginx/certs/*.key
 
+**/__snapshots__/
+**/*.snap
 # Misc PR/planning docs at root (don't track these)
 PR_DESCRIPTION.md
 PR_MESSAGES.md
