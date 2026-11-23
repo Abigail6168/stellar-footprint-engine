@@ -47,12 +47,29 @@ export async function getLatestLedgerCached(
   rpcLatencyMs: number;
 }
 
+export interface NetworkLimitsResult {
+  protocolVersion: number;
+  limits: {
+    maxContractCpuInstructions: number;
+    maxMemoryBytes: number;
+    maxFootprintEntries: number;
+  };
+}
+
 interface CachedStatus {
   data: NetworkStatusResult;
   timestamp: number;
 }
 
+interface CachedLimits {
+  data: NetworkLimitsResult;
+  timestamp: number;
+}
+
 const cache = new Map<Network, CachedStatus>();
+const limitsCache = new Map<Network, CachedLimits>();
+
+const LIMITS_CACHE_TTL_MS = 600_000; // 10 minutes
 
 function getTtlMs(): number {
   const fromEnv = parseInt(process.env.NETWORK_STATUS_TTL_MS ?? "", 10);

@@ -62,6 +62,9 @@ router.get("/simulate/history", getSimulateHistory);
 // GET /simulate/jobs/:jobId — inspect async webhook simulation delivery status
 router.get("/simulate/jobs/:jobId", getSimulationJob);
 
+// POST /simulate/batch/dag — dependency-graph-aware batch simulation with topological execution
+router.post("/simulate/batch/dag", simulateDependentBatchController);
+
 // POST /simulate/batch — accepts { transactions: [{ xdr }], network } and returns array of results
 router.post("/simulate/batch", requireScope("simulate:batch"), simulateBatch);
 

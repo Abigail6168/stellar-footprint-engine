@@ -14,7 +14,7 @@ import {
   mockTransaction,
 } from "../../tests/factories/transactionFactory";
 import * as footprintParser from "../footprintParser";
-import { simulateTransaction, simulateDryRun } from "../simulator";
+import { simulateTransaction, simulateDryRun, simulateDependentBatch } from "../simulator";
 
 jest.mock("@config/stellar", () => ({
   getNetworkConfig: jest.fn().mockReturnValue({

@@ -15,12 +15,14 @@ import {
 } from "@services/feeEstimator";
 import { footprintDiff, type FootprintInput } from "@services/footprintDiff";
 import { calculateFootprintStats } from "@services/footprintExtractor";
-import { getNetworkStatus } from "@services/networkStatus";
+import { getNetworkStatus, getNetworkLimits } from "@services/networkStatus";
 import { buildRestoreTransaction } from "@services/restorer";
 import { getRpcStats } from "@services/rpcClient";
 import {
   simulateTransaction,
   simulateDryRun as analyzeDryRun,
+  simulateDependentBatch,
+  type DependentTx,
 } from "@services/simulator";
 import { validateXdr } from "@services/validator";
 import {

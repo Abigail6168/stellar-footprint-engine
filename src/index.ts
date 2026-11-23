@@ -11,10 +11,12 @@ initTracing();
 const _startupBegin = process.hrtime.bigint();
 
 import path from "path";
+import zlib from "zlib";
 
 import compression from "compression";
 import cors from "cors";
 import express from "express";
+import type { Request, Response, NextFunction } from "express";
 import helmet from "helmet";
 
 import routes from "./api/routes";
@@ -186,6 +188,122 @@ app.use((_req, res, next) => {
   );
   next();
 });
+/**
+ * Custom Brotli compression middleware (#38).
+ * Runs BEFORE the gzip middleware. When the client sends Accept-Encoding: br
+ * and the response body exceeds COMPRESSION_THRESHOLD, the response is
+ * Brotli-compressed. Otherwise falls through to the gzip middleware.
+ * Health endpoints bypass compression entirely.
+ */
+function brotliMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  // Skip health endpoints
+  if (req.path.startsWith("/api/v1/health")) {
+    next();
+    return;
+  }
+
+  const acceptEncoding = (req.headers["accept-encoding"] as string) ?? "";
+  if (!acceptEncoding.includes("br")) {
+    next();
+    return;
+  }
+
+  const originalWrite = res.write.bind(res) as typeof res.write;
+  const originalEnd = res.end.bind(res) as typeof res.end;
+
+  const chunks: Buffer[] = [];
+  let headersSent = false;
+
+  const finalize = (body: Buffer) => {
+    if (body.length < COMPRESSION_THRESHOLD) {
+      // Below threshold — send uncompressed
+      originalWrite(body);
+      originalEnd();
+      return;
+    }
+
+    const brotli = zlib.createBrotliCompress();
+    const compressed: Buffer[] = [];
+
+    brotli.on("data", (chunk: Buffer) => compressed.push(chunk));
+    brotli.on("end", () => {
+      const result = Buffer.concat(compressed);
+      res.setHeader("Content-Encoding", "br");
+      res.removeHeader("Content-Length");
+      originalWrite(result);
+      originalEnd();
+    });
+    brotli.on("error", () => {
+      // Fallback: send uncompressed on error
+      originalWrite(body);
+      originalEnd();
+    });
+
+    brotli.end(body);
+  };
+
+  // Intercept write
+  res.write = function (
+    chunk: unknown,
+    encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
+    callback?: (err?: Error | null) => void,
+  ): boolean {
+    if (!headersSent) {
+      headersSent = true;
+    }
+    const buf =
+      chunk instanceof Buffer
+        ? chunk
+        : Buffer.from(
+            chunk as string,
+            typeof encodingOrCallback === "string"
+              ? encodingOrCallback
+              : "utf8",
+          );
+    chunks.push(buf);
+    if (typeof encodingOrCallback === "function") {
+      encodingOrCallback();
+    } else if (typeof callback === "function") {
+      callback();
+    }
+    return true;
+  } as typeof res.write;
+
+  // Intercept end
+  res.end = function (
+    chunk?: unknown,
+    encodingOrCallback?: BufferEncoding | (() => void),
+    callback?: () => void,
+  ): Response {
+    if (chunk !== undefined && chunk !== null) {
+      const buf =
+        chunk instanceof Buffer
+          ? chunk
+          : Buffer.from(
+              chunk as string,
+              typeof encodingOrCallback === "string"
+                ? encodingOrCallback
+                : "utf8",
+            );
+      chunks.push(buf);
+    }
+    if (typeof encodingOrCallback === "function") {
+      encodingOrCallback();
+    } else if (typeof callback === "function") {
+      callback();
+    }
+    finalize(Buffer.concat(chunks));
+    return res;
+  } as typeof res.end;
+
+  next();
+}
+
+app.use(brotliMiddleware);
 app.use(compression({ threshold: COMPRESSION_THRESHOLD }));
 
 // Route-specific body parsers: batch endpoints accept larger payloads (2MB)
